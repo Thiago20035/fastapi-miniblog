@@ -1,7 +1,7 @@
 from typing import Optional, List, Tuple
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session, selectinload, joinedload
-from app.models import PostORM, TagORM, UserORM
+from app.models import CategoryORM, PostORM, TagORM, UserORM
 from app.api.v1.tags.repository import TagRepository
 from app.services.pagination import paginate_query
 
@@ -14,11 +14,14 @@ class PostRepository:
         post_find = select(PostORM).where(PostORM.id == post_id)
         return self.db.execute(post_find).scalar_one_or_none()
 
-    def search(self, query: Optional[str], order_by: str, direction: str, page: int, per_page: int) -> dict:
+    def search(self, query: Optional[str], order_by: str, direction: str, page: int, per_page: int,
+               category_slug: Optional[str] = None) -> dict:
         results = select(PostORM)
 
         if query:
             results = results.where(PostORM.title.ilike(f"%{query}%"))
+        if category_slug:
+            results = results.join(PostORM.category).where(CategoryORM.slug == category_slug)
 
         return paginate_query(
             self.db, PostORM, results,
@@ -48,8 +51,10 @@ class PostRepository:
     def ensure_tag(self, name: str) -> TagORM:
         return TagRepository(self.db).ensure_tag(name)
 
-    def create_post(self, title: str, content: str, user: Optional[UserORM], tags: List[dict], image_url: Optional[str]) -> PostORM:
-        post = PostORM(title=title, content=content, image_url=image_url, user=user)
+    def create_post(self, title: str, content: str, user: Optional[UserORM], tags: List[dict],
+                    image_url: Optional[str], category_id: Optional[int] = None) -> PostORM:
+        post = PostORM(title=title, content=content, image_url=image_url, user=user,
+                       category_id=category_id)
         self.db.add(post)  # antes de buscar tags, para que el flush no deje el post afuera
         for tag in tags:
             tag_obj = self.ensure_tag(tag["name"])
@@ -60,8 +65,11 @@ class PostRepository:
         return post
 
     def update_post(self, post: PostORM, updates: dict) -> PostORM:
+        tag_names = updates.pop("tags", None)
         for key, value in updates.items():
             setattr(post, key, value)
+        if tag_names is not None:
+            post.tags = [self.ensure_tag(name) for name in tag_names]
 
         return post
 

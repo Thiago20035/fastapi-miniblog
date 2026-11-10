@@ -66,3 +66,11 @@ def save_uploaded_image(file: UploadFile) -> dict:
         # "chunk_calls": reader.calls,
         # "chunk_sizes_sample": reader.sizes[:5]
     }
+
+
+def delete_media(saved: dict | None) -> None:
+    """Borra una imagen ya guardada (por ejemplo, si después falló el alta del post)."""
+    if saved and saved.get("filename"):
+        path = os.path.join(MEDIA_DIR, saved["filename"])
+        if os.path.exists(path):
+            os.remove(path)

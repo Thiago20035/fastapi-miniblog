@@ -7,6 +7,7 @@ from app.api.v1.auth.router import router as auth_router
 from app.api.v1.uploads.router import router as upload_router
 from app.api.v1.tags.router import router as tag_router
 from app.api.v1.users.router import router as user_router
+from app.api.v1.categories.router import router as category_router
 from app import models  # noqa: F401  (registra todas las tablas)
 from fastapi.staticfiles import StaticFiles
 
@@ -21,6 +22,7 @@ def create_app() -> FastAPI:
     app.include_router(post_router)
     app.include_router(tag_router)
     app.include_router(user_router)
+    app.include_router(category_router)
     app.include_router(upload_router)  # Add the upload router
 
     os.makedirs(MEDIA_DIR, exist_ok=True)  # Ensure media directory exists
