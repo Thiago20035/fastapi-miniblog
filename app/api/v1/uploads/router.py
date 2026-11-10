@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, status
 from app.core.security import require_role
 from app.services.file_storage import save_uploaded_image
 
-router = APIRouter(prefix="/upload", tags=["uploads"], dependencies=[Depends(require_role("editor"))])
+router = APIRouter(prefix="/upload", tags=["uploads"], dependencies=[Depends(require_role("moderator"))])
 
 MEDIA_DIR = "app/media"
 

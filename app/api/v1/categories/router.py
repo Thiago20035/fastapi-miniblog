@@ -11,9 +11,9 @@ from app.models import CategoryORM
 from .repository import CategoryRepository
 from .schemas import CategoryCreate, CategoryPublic, CategoryUpdate, CategoryWithCount
 
-router = APIRouter(prefix="/categories", tags=["categories"])
+router = APIRouter(prefix="/categories", tags=["categories (comunidades)"])
 
-editor = require_role("editor")
+moderator = require_role("moderator")
 
 
 def _get_or_404(repository: CategoryRepository, category_id: int) -> CategoryORM:
@@ -38,7 +38,7 @@ def list_categories(
 
 @router.get("/stats", response_model=List[CategoryWithCount])
 def categories_with_count(db: Session = Depends(get_db)):
-    """Cada categoría con la cantidad de posts que tiene."""
+    """Cada comunidad con la cantidad de posts que tiene."""
     return CategoryRepository(db).with_counts()
 
 
@@ -55,7 +55,7 @@ def get_category(category_id: int = Path(..., ge=1), db: Session = Depends(get_d
     return _get_or_404(CategoryRepository(db), category_id)
 
 
-@router.post("", response_model=CategoryPublic, status_code=status.HTTP_201_CREATED, dependencies=[Depends(editor)])
+@router.post("", response_model=CategoryPublic, status_code=status.HTTP_201_CREATED, dependencies=[Depends(moderator)])
 def create_category(data: CategoryCreate, db: Session = Depends(get_db)):
     repository = CategoryRepository(db)
     if repository.get_by_slug(data.slug):
@@ -69,7 +69,7 @@ def create_category(data: CategoryCreate, db: Session = Depends(get_db)):
     return category
 
 
-@router.patch("/{category_id}", response_model=CategoryPublic, dependencies=[Depends(editor)])
+@router.patch("/{category_id}", response_model=CategoryPublic, dependencies=[Depends(moderator)])
 def update_category(data: CategoryUpdate, category_id: int = Path(..., ge=1), db: Session = Depends(get_db)):
     repository = CategoryRepository(db)
     category = _get_or_404(repository, category_id)

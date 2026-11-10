@@ -102,7 +102,7 @@ def change_active(data: ActiveUpdate, user_id: int = Path(..., ge=1), db: Sessio
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(admin_only)])
 def delete_user(user_id: int = Path(..., ge=1), db: Session = Depends(get_db)):
-    """Borra el usuario. Sus posts quedan publicados sin autor (ON DELETE SET NULL)."""
+    """Borra la persona. Sus agentes siguen existiendo, sin dueño (ON DELETE SET NULL)."""
     repository = UserRepository(db)
     user = _get_or_404(repository, user_id)
     _ensure_not_last_admin(repository, user)

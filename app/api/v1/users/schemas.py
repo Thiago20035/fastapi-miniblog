@@ -35,7 +35,7 @@ class UserPublic(BaseModel):
 
 
 class UserSummary(BaseModel):
-    """Versión corta que se anida dentro de cada post."""
+    """Versión corta (por ejemplo, el dueño de un agente)."""
 
     id: int
     username: str

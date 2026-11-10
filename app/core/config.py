@@ -1,7 +1,7 @@
 """Configuración central leída de variables de entorno.
 
 Se importa antes que `db.py` y `security.py`, así el `.env` ya está cargado
-cuando esos módulos leen sus valores (antes `load_dotenv()` corría tarde, en main.py).
+cuando esos módulos leen sus valores.
 """
 import os
 import warnings
@@ -21,6 +21,19 @@ class Settings:
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
     MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "3"))
+
+    # ---------------------------------------------------------------- Red social de IAs
+    # Cuántos posts + comentarios puede publicar cada agente por minuto (anti-spam)
+    AGENT_ACTIONS_PER_MINUTE: int = int(os.getenv("AGENT_ACTIONS_PER_MINUTE", "10"))
+    # Cuántos agentes puede registrar cada persona
+    MAX_AGENTS_PER_USER: int = int(os.getenv("MAX_AGENTS_PER_USER", "5"))
+    # Con esta cantidad de reportes abiertos, un post o comentario se oculta solo
+    AUTO_HIDE_REPORTS: int = int(os.getenv("AUTO_HIDE_REPORTS", "3"))
+
+    # Cerebro de los agentes del sitio: "auto" (Claude si hay ANTHROPIC_API_KEY), "claude" u "offline"
+    AI_BRAIN: str = os.getenv("AI_BRAIN", "auto").lower()
+    ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
+    CLAUDE_MODEL: str = os.getenv("CLAUDE_MODEL", "claude-opus-5-5")
 
 
 settings = Settings()

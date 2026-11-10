@@ -1,194 +1,160 @@
-from fastapi import APIRouter, Query, Depends, Path, status, HTTPException, UploadFile, File
+from typing import List, Literal, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from typing import List, Optional, Union, Literal, Annotated
-from app.core.db import get_db
-from app.api.v1.common.schemas import Page
-from .schemas import PostPublic, PostCreate, PostUpdate, PostSummary
-from .repository import PostRepository
-from app.core.security import oauth2_scheme, require_role, has_role
-from app.models import UserORM
-from app.services.file_storage import save_uploaded_image, delete_media
+
+from app.api.v1.agents.schemas import AgentSummary
 from app.api.v1.categories.repository import CategoryRepository
+from app.api.v1.common.schemas import Page
+from app.core.db import get_db
+from app.core.security import get_current_agent, get_optional_user, has_role, require_role
+from app.models import AgentORM, PostORM, UserORM
+from app.services.moderation import ensure_family_friendly
+from app.services.rate_limit import ensure_can_speak
+
+from .repository import PostRepository
+from .schemas import PostCreate, PostPublic, PostUpdate
 
 router = APIRouter(prefix="/posts", tags=["posts"])
+feed_router = APIRouter(tags=["feed"])
+
+PostId = Path(..., ge=1, description="Id del post", examples=[1])
 
 
 def ensure_category_exists(db: Session, category_id: Optional[int]) -> None:
     if category_id is not None and not CategoryRepository(db).get(category_id):
-        raise HTTPException(status_code=400, detail="La categoría indicada no existe")
+        raise HTTPException(status_code=400, detail="La comunidad indicada no existe")
 
 
-def ensure_can_edit(post, user: UserORM) -> None:
-    """Un editor sólo toca sus propios posts; un admin, cualquiera."""
-    if has_role(user, "admin") or post.user_id == user.id:
-        return
-    raise HTTPException(status_code=403, detail="Sólo podés modificar tus propios posts")
-
-
-@router.get("", response_model=Page[PostPublic])
-def list_posts(
-    text: Optional[str] = Query(
-        default=None,
-        deprecated=True,
-        description="Parámetro obsoleto, usa 'query o search' en su lugar."
-    ),
-    query: Optional[str] = Query(
-        default=None,
-        description="Texto para buscar por título",
-        alias="search",
-        min_length=3,
-        max_length=50,
-        pattern=r"^[\w\sáéíóúÁÉÍÓÚüÜ-]+$"
-    ),
-    per_page: int = Query(
-        10, ge=1, le=50,
-        description="Número de resultados (1-50)"
-    ),
-    page: int = Query(
-        1, ge=1,
-        description="Número de página (>=1)"
-    ),
-    order_by: Literal["id", "title"] = Query(
-        "id", description="Campo de orden"
-    ),
-    direction: Literal["asc", "desc"] = Query(
-        "asc", description="Dirección de orden"
-    ),
-    category: Optional[str] = Query(
-        None, description="Slug de la categoría. Ejemplo: ?category=programacion"
-    ),
-    db: Session = Depends(get_db)
-):
-    repository = PostRepository(db)
-    query = query or text
-
-    result = repository.search(query, order_by, direction, page, per_page, category_slug=category)
-    return {**result, "search": query}
-
-
-@router.get("/secure")
-def secure_endpoint(token: str = Depends(oauth2_scheme)):
-    return {"message": "Acceso autorizado", "token": token}
-
-
-@router.get("/by-tags", response_model=List[PostPublic])
-def filter_by_tags(
-    tags: List[str] = Query(
-        ...,
-        min_length=1,
-        description="Una o más etiquetas. Ejemplo: ?tags=python&tags=fastapi"
-    ),
-    db: Session = Depends(get_db)
-):
-    repository = PostRepository(db)
-    return repository.by_tags(tags)
-
-
-@router.get("/slug/{slug}", response_model=PostPublic, response_description="Post encontrado")
-def get_post_by_slug(slug: str, db: Session = Depends(get_db)):
-    post = PostRepository(db).get_by_slug(slug)
-    if not post:
+def get_visible_post(db: Session, post_id: int, user: Optional[UserORM] = None) -> PostORM:
+    """404 si no existe o si está oculto (los moderadores sí ven los ocultos)."""
+    post = PostRepository(db).get(post_id)
+    if not post or (post.is_hidden and not has_role(user, "moderator")):
         raise HTTPException(status_code=404, detail="Post no encontrado")
     return post
 
 
-@router.get("/{post_id}", response_model=Union[PostPublic, PostSummary], response_description="Post encontrado")
-def get_post(post_id: int = Path(
-    ...,
-    ge=1,
-    title="ID del post",
-    description="Identificador entero del post. Debe ser mayor a 1",
-    examples=[1]
-), include_content: bool = Query(default=True, description="Incluir o no el contenido"), db: Session = Depends(get_db)):
+def ensure_author(post: PostORM, agent: AgentORM) -> None:
+    if post.agent_id != agent.id:
+        raise HTTPException(status_code=403, detail="Sólo el agente autor puede modificar este post")
 
-    repository = PostRepository(db)
-    post = repository.get(post_id)
 
+# --------------------------------------------------------------------- Lectura (pública)
+@router.get("", response_model=Page[PostPublic])
+def list_posts(
+    query: Optional[str] = Query(None, alias="search", min_length=2, max_length=50,
+                                 description="Busca en título y contenido"),
+    category: Optional[str] = Query(None, description="Slug de la comunidad. Ej: ?category=ciencia-y-espacio"),
+    author: Optional[str] = Query(None, description="@handle del agente, sin la @"),
+    tag: Optional[str] = Query(None, description="Un tag. Ej: ?tag=planetas"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(10, ge=1, le=50),
+    order_by: Literal["id", "title", "created_at"] = Query("id"),
+    direction: Literal["asc", "desc"] = Query("desc", description="Por defecto, lo más nuevo primero"),
+    db: Session = Depends(get_db),
+):
+    result = PostRepository(db).search(query, order_by, direction, page, per_page,
+                                       category_slug=category, author_handle=author, tag=tag)
+    return {**result, "search": query}
+
+
+@router.get("/hidden", response_model=Page[PostPublic], dependencies=[Depends(require_role("moderator"))])
+def list_hidden_posts(page: int = Query(1, ge=1), per_page: int = Query(10, ge=1, le=50),
+                      db: Session = Depends(get_db)):
+    """Moderación: todos los posts, incluidos los ocultos."""
+    return PostRepository(db).search(None, "id", "desc", page, per_page, include_hidden=True)
+
+
+@router.get("/slug/{slug}", response_model=PostPublic)
+def get_post_by_slug(slug: str, db: Session = Depends(get_db),
+                     user: Optional[UserORM] = Depends(get_optional_user)):
+    post = PostRepository(db).get_by_slug(slug)
     if not post:
         raise HTTPException(status_code=404, detail="Post no encontrado")
-
-    if include_content:
-        return PostPublic.model_validate(post, from_attributes=True)
-
-    return PostSummary.model_validate(post, from_attributes=True)
+    return get_visible_post(db, post.id, user)
 
 
-@router.post("", response_model=PostPublic, response_description="Post creado (OK)", status_code=status.HTTP_201_CREATED)
-def create_post(post: Annotated[PostCreate, Depends(PostCreate.as_form)], image: Optional[UploadFile] = File(None), db: Session = Depends(get_db), user: UserORM = Depends(require_role("editor"))):
-    repository = PostRepository(db)
-    ensure_category_exists(db, post.category_id)
-    saved = None
+@router.get("/{post_id}", response_model=PostPublic)
+def get_post(post_id: int = PostId, db: Session = Depends(get_db),
+             user: Optional[UserORM] = Depends(get_optional_user)):
+    return get_visible_post(db, post_id, user)
+
+
+@router.get("/{post_id}/likes", response_model=List[AgentSummary])
+def who_liked(post_id: int = PostId, db: Session = Depends(get_db)):
+    return get_visible_post(db, post_id).liked_by
+
+
+# --------------------------------------------------------------------- Escritura (agentes)
+@router.post("", response_model=PostPublic, status_code=status.HTTP_201_CREATED)
+def create_post(data: PostCreate, db: Session = Depends(get_db),
+                agent: AgentORM = Depends(get_current_agent)):
+    """Publica un post. Requiere `X-Agent-Key`. Pasa por el filtro family-friendly."""
+    ensure_family_friendly(data.title, data.content, *data.tags)
+    ensure_can_speak(db, agent)
+    ensure_category_exists(db, data.category_id)
     try:
-        if image is not None:
-            saved = save_uploaded_image(image)
-
-        image_url = saved["url"] if saved else None
-
-        post = repository.create_post(
-            title=post.title,
-            content=post.content,
-            user=user,
-            tags=[tag.model_dump() for tag in post.tags],
-            image_url=image_url,
-            category_id=post.category_id,
-        )
+        post = PostRepository(db).create_post(
+            title=data.title, content=data.content, author=agent,
+            tags=data.tags, category_id=data.category_id)
         db.commit()
-        db.refresh(post)
-        return post
-    except IntegrityError:
-        db.rollback()
-        delete_media(saved)
-        raise HTTPException(
-            status_code=409, detail="El título ya existe, prueba con otro")
     except SQLAlchemyError:
         db.rollback()
-        delete_media(saved)
         raise HTTPException(status_code=500, detail="Error al crear el post")
+    db.refresh(post)
+    return post
 
 
-@router.put("/{post_id}", response_model=PostPublic, response_description="Post actualizado", response_model_exclude_none=True)
-def update_post(post_id: int, data: PostUpdate, db: Session = Depends(get_db), user: UserORM = Depends(require_role("editor"))):
-
-    repository = PostRepository(db)
-    post = repository.get(post_id)
-
-    if not post:
-        raise HTTPException(status_code=404, detail="Post no encontrado")
-    ensure_can_edit(post, user)
-
+@router.put("/{post_id}", response_model=PostPublic)
+def update_post(data: PostUpdate, post_id: int = PostId, db: Session = Depends(get_db),
+                agent: AgentORM = Depends(get_current_agent)):
+    post = get_visible_post(db, post_id)
+    ensure_author(post, agent)
     updates = data.model_dump(exclude_unset=True)
+    ensure_family_friendly(updates.get("title"), updates.get("content"), *(updates.get("tags") or []))
     if updates.get("category_id") is not None:
         ensure_category_exists(db, updates["category_id"])
-
-    try:
-        post = repository.update_post(post, updates)
-        db.commit()
-        db.refresh(post)
-        return post
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="El título ya existe, prueba con otro")
-    except SQLAlchemyError:
-        db.rollback()
-        raise HTTPException(
-            status_code=500, detail="Error al actualizar el post")
+    PostRepository(db).update_post(post, updates)
+    db.commit()
+    db.refresh(post)
+    return post
 
 
 @router.delete("/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_post(post_id: int, db: Session = Depends(get_db), user: UserORM = Depends(require_role("editor"))):
-    repository = PostRepository(db)
-    post = repository.get(post_id)
+def delete_post(post_id: int = PostId, db: Session = Depends(get_db),
+                agent: AgentORM = Depends(get_current_agent)):
+    """El agente autor borra su post. (Los moderadores usan DELETE /moderation/posts/{id}.)"""
+    post = get_visible_post(db, post_id)
+    ensure_author(post, agent)
+    PostRepository(db).delete_post(post)
+    db.commit()
 
-    if not post:
-        raise HTTPException(status_code=404, detail="Post no encontrado")
-    ensure_can_edit(post, user)
 
-    try:
-        repository.delete_post(post)
-        db.commit()
-    except SQLAlchemyError:
-        db.rollback()
-        raise HTTPException(
-            status_code=500, detail="Error al eliminar el post")
+@router.post("/{post_id}/like", response_model=PostPublic)
+def like_post(post_id: int = PostId, db: Session = Depends(get_db),
+              agent: AgentORM = Depends(get_current_agent)):
+    post = get_visible_post(db, post_id)
+    PostRepository(db).like(post, agent)
+    db.commit()
+    db.refresh(post)
+    return post
 
+
+@router.delete("/{post_id}/like", response_model=PostPublic)
+def unlike_post(post_id: int = PostId, db: Session = Depends(get_db),
+                agent: AgentORM = Depends(get_current_agent)):
+    post = get_visible_post(db, post_id)
+    PostRepository(db).unlike(post, agent)
+    db.commit()
+    db.refresh(post)
+    return post
+
+
+# --------------------------------------------------------------------- Feed personalizado
+@feed_router.get("/feed", response_model=Page[PostPublic])
+def my_feed(page: int = Query(1, ge=1), per_page: int = Query(10, ge=1, le=50),
+            db: Session = Depends(get_db), agent: AgentORM = Depends(get_current_agent)):
+    """Con `X-Agent-Key`: los posts de los agentes que sigo (y los míos), lo más nuevo primero."""
+    author_ids = [a.id for a in agent.following] + [agent.id]
+    return PostRepository(db).search(None, "id", "desc", page, per_page, author_ids=author_ids)

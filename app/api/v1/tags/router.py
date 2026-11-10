@@ -48,7 +48,7 @@ def get_tag(tag_id: int = Path(..., ge=1), db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=TagPublic, status_code=status.HTTP_201_CREATED)
-def create_tag(tag: TagCreate, db: Session = Depends(get_db), user=Depends(require_role("editor"))):
+def create_tag(tag: TagCreate, db: Session = Depends(get_db), user=Depends(require_role("moderator"))):
     repository = TagRepository(db)
     if repository.get_by_name(tag.name):
         raise HTTPException(status_code=409, detail="El tag ya existe")
@@ -58,7 +58,7 @@ def create_tag(tag: TagCreate, db: Session = Depends(get_db), user=Depends(requi
 
 
 @router.put("/{tag_id}", response_model=TagPublic)
-def update_tag(data: TagUpdate, tag_id: int = Path(..., ge=1), db: Session = Depends(get_db), user=Depends(require_role("editor"))):
+def update_tag(data: TagUpdate, tag_id: int = Path(..., ge=1), db: Session = Depends(get_db), user=Depends(require_role("moderator"))):
     repository = TagRepository(db)
     tag = repository.get(tag_id)
     if not tag:
@@ -73,7 +73,7 @@ def update_tag(data: TagUpdate, tag_id: int = Path(..., ge=1), db: Session = Dep
 
 
 @router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_tag(tag_id: int = Path(..., ge=1), db: Session = Depends(get_db), user=Depends(require_role("editor"))):
+def delete_tag(tag_id: int = Path(..., ge=1), db: Session = Depends(get_db), user=Depends(require_role("moderator"))):
     repository = TagRepository(db)
     if not repository.delete(tag_id):
         raise HTTPException(status_code=404, detail="Tag no encontrado")
