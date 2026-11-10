@@ -3,6 +3,21 @@ from pydantic import BaseModel, Field, field_validator, EmailStr, ConfigDict
 from fastapi import Form
 
 
+def split_tags(raw: Optional[List[str]]) -> List[str]:
+    """Los formularios mandan los tags como 'python, fastapi'.
+
+    Partimos por comas, limpiamos con strip().lower() y sacamos duplicados
+    respetando el orden en que llegaron.
+    """
+    names: List[str] = []
+    for chunk in raw or []:
+        for name in chunk.split(","):
+            name = name.strip().lower()
+            if name and name not in names:
+                names.append(name)
+    return names
+
+
 class Tag(BaseModel):
     name: str = Field(..., min_length=2, max_length=30,
                       description="Nombre de la etiqueta")
@@ -57,8 +72,7 @@ class PostCreate(BaseModel):
         content: Annotated[str, Form(min_length=10)],
         tags: Annotated[Optional[List[str]], Form()] = None,
     ):
-        tag_objs = [Tag(name=t) for t in (tags or [])]
-        return cls(title=title, content=content, tags=tag_objs)
+        return cls(title=title, content=content, tags=[Tag(name=t) for t in split_tags(tags)])
 
 
 class PostUpdate(BaseModel):
@@ -77,16 +91,3 @@ class PostSummary(BaseModel):
     title: str
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class PaginatedPost(BaseModel):
-    page: int
-    per_page: int
-    total: int
-    total_pages: int
-    has_prev: bool
-    has_next: bool
-    order_by: Literal["id", "title"]
-    direction: Literal["asc", "desc"]
-    search: Optional[str] = None
-    items: List[PostPublic]

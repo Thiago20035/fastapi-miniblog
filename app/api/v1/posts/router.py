@@ -1,11 +1,10 @@
-from math import ceil
 from fastapi import APIRouter, Query, Depends, Path, status, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from typing import List, Optional, Union, Literal, Annotated
 from app.core.db import get_db
-from .schemas import (PostPublic, PaginatedPost,
-                      PostCreate, PostUpdate, PostSummary)
+from app.api.v1.common.schemas import Page
+from .schemas import PostPublic, PostCreate, PostUpdate, PostSummary
 from .repository import PostRepository
 from app.core.security import oauth2_scheme, get_current_user
 from app.services.file_storage import save_uploaded_image
@@ -13,7 +12,7 @@ from app.services.file_storage import save_uploaded_image
 router = APIRouter(prefix="/posts", tags=["posts"])
 
 
-@router.get("", response_model=PaginatedPost)
+@router.get("", response_model=Page[PostPublic])
 def list_posts(
     text: Optional[str] = Query(
         default=None,
@@ -47,27 +46,13 @@ def list_posts(
     repository = PostRepository(db)
     query = query or text
 
-    total, items = repository.search(
-        query, order_by, direction, page, per_page)
+    result = repository.search(query, order_by, direction, page, per_page)
+    return {**result, "search": query}
 
-    total_pages = ceil(total/per_page) if total > 0 else 0
-    current_page = 1 if total_pages == 0 else min(page, total_pages)
 
-    has_prev = current_page > 1
-    has_next = current_page < total_pages if total_pages > 0 else False
-
-    return PaginatedPost(
-        page=current_page,
-        per_page=per_page,
-        total=total,
-        total_pages=total_pages,
-        has_prev=has_prev,
-        has_next=has_next,
-        order_by=order_by,
-        direction=direction,
-        search=query,
-        items=items
-    )
+@router.get("/secure")
+def secure_endpoint(token: str = Depends(oauth2_scheme)):
+    return {"message": "Acceso autorizado", "token": token}
 
 
 @router.get("/by-tags", response_model=List[PostPublic])
@@ -170,7 +155,3 @@ def delete_post(post_id: int, db: Session = Depends(get_db), user=Depends(get_cu
         raise HTTPException(
             status_code=500, detail="Error al eliminar el post")
 
-
-@router.get("/secure")
-def secure_endpoint(token: str = Depends(oauth2_scheme)):
-    return {"message": "Acceso autorizado", "token": token}
