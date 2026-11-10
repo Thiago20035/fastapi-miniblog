@@ -1,7 +1,7 @@
 from typing import Optional, List, Tuple
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session, selectinload, joinedload
-from app.models import PostORM, TagORM, AuthorORM
+from app.models import PostORM, TagORM, UserORM
 from app.api.v1.tags.repository import TagRepository
 from app.services.pagination import paginate_query
 
@@ -38,40 +38,18 @@ class PostRepository:
             select(PostORM)
             .options(
                 selectinload(PostORM.tags),
-                joinedload(PostORM.author),
+                joinedload(PostORM.user),
             ).where(PostORM.tags.any(func.lower(TagORM.name).in_(normalized_tag_names)))
             .order_by(PostORM.id.asc())
         )
 
         return self.db.execute(post_list).scalars().all()
 
-    def ensure_author(self, name: str, email: str) -> AuthorORM:
-
-        author_obj = self.db.execute(
-            select(AuthorORM).where(AuthorORM.email == email)
-        ).scalar_one_or_none()
-
-        if author_obj:
-            return author_obj
-
-        author_obj = AuthorORM(name=name,
-                               email=email)
-        self.db.add(author_obj)
-        self.db.flush()
-
-        return author_obj
-
     def ensure_tag(self, name: str) -> TagORM:
         return TagRepository(self.db).ensure_tag(name)
 
-    def create_post(self, title: str, content: str, author: Optional[dict], tags: List[dict], image_url: str) -> PostORM:
-        author_obj = None
-        if author:
-            author_obj = self.ensure_author(
-                author["username"], author["email"])
-
-        post = PostORM(title=title, content=content, image_url=image_url,
-                       author=author_obj)
+    def create_post(self, title: str, content: str, user: Optional[UserORM], tags: List[dict], image_url: Optional[str]) -> PostORM:
+        post = PostORM(title=title, content=content, image_url=image_url, user=user)
         self.db.add(post)  # antes de buscar tags, para que el flush no deje el post afuera
         for tag in tags:
             tag_obj = self.ensure_tag(tag["name"])

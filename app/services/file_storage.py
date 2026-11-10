@@ -6,7 +6,9 @@ from fastapi import APIRouter, File, UploadFile, HTTPException, status
 
 MEDIA_DIR = "app/media"
 ALLOW_MIME = ["image/png", "image/jpeg"]
-MAX_MB = int(os.getenv("MAX_UPLOAD_MB", "3"))
+from app.core.config import settings
+
+MAX_MB = settings.MAX_UPLOAD_MB
 CHUNKS = 1024 * 1024
 
 

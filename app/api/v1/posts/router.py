@@ -6,10 +6,18 @@ from app.core.db import get_db
 from app.api.v1.common.schemas import Page
 from .schemas import PostPublic, PostCreate, PostUpdate, PostSummary
 from .repository import PostRepository
-from app.core.security import oauth2_scheme, get_current_user
+from app.core.security import oauth2_scheme, require_role, has_role
+from app.models import UserORM
 from app.services.file_storage import save_uploaded_image
 
 router = APIRouter(prefix="/posts", tags=["posts"])
+
+
+def ensure_can_edit(post, user: UserORM) -> None:
+    """Un editor sólo toca sus propios posts; un admin, cualquiera."""
+    if has_role(user, "admin") or post.user_id == user.id:
+        return
+    raise HTTPException(status_code=403, detail="Sólo podés modificar tus propios posts")
 
 
 @router.get("", response_model=Page[PostPublic])
@@ -90,7 +98,7 @@ def get_post(post_id: int = Path(
 
 
 @router.post("", response_model=PostPublic, response_description="Post creado (OK)", status_code=status.HTTP_201_CREATED)
-def create_post(post: Annotated[PostCreate, Depends(PostCreate.as_form)], image: Optional[UploadFile] = File(None), db: Session = Depends(get_db), user=Depends(get_current_user)):
+def create_post(post: Annotated[PostCreate, Depends(PostCreate.as_form)], image: Optional[UploadFile] = File(None), db: Session = Depends(get_db), user: UserORM = Depends(require_role("editor"))):
     repository = PostRepository(db)
     saved = None
     try:
@@ -102,7 +110,7 @@ def create_post(post: Annotated[PostCreate, Depends(PostCreate.as_form)], image:
         post = repository.create_post(
             title=post.title,
             content=post.content,
-            author=user,
+            user=user,
             tags=[tag.model_dump() for tag in post.tags],
             image_url=image_url
         )
@@ -119,13 +127,14 @@ def create_post(post: Annotated[PostCreate, Depends(PostCreate.as_form)], image:
 
 
 @router.put("/{post_id}", response_model=PostPublic, response_description="Post actualizado", response_model_exclude_none=True)
-def update_post(post_id: int, data: PostUpdate, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def update_post(post_id: int, data: PostUpdate, db: Session = Depends(get_db), user: UserORM = Depends(require_role("editor"))):
 
     repository = PostRepository(db)
     post = repository.get(post_id)
 
     if not post:
         raise HTTPException(status_code=404, detail="Post no encontrado")
+    ensure_can_edit(post, user)
 
     try:
         updates = data.model_dump(exclude_unset=True)
@@ -140,12 +149,13 @@ def update_post(post_id: int, data: PostUpdate, db: Session = Depends(get_db), u
 
 
 @router.delete("/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_post(post_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def delete_post(post_id: int, db: Session = Depends(get_db), user: UserORM = Depends(require_role("editor"))):
     repository = PostRepository(db)
     post = repository.get(post_id)
 
     if not post:
         raise HTTPException(status_code=404, detail="Post no encontrado")
+    ensure_can_edit(post, user)
 
     try:
         repository.delete_post(post)

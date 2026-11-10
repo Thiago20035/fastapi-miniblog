@@ -1,10 +1,11 @@
 import os
 import shutil
 import uuid
-from fastapi import APIRouter, File, UploadFile, HTTPException, status
+from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, status
+from app.core.security import require_role
 from app.services.file_storage import save_uploaded_image
 
-router = APIRouter(prefix="/upload", tags=["uploads"])
+router = APIRouter(prefix="/upload", tags=["uploads"], dependencies=[Depends(require_role("editor"))])
 
 MEDIA_DIR = "app/media"
 

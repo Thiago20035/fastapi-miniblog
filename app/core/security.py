@@ -1,16 +1,34 @@
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from fastapi.security import OAuth2PasswordBearer
-from fastapi import Depends, HTTPException, status
+
 import jwt
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
 from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
+from pwdlib import PasswordHash
+from sqlalchemy.orm import Session
 
-SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-prod")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(
-    os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+from app.core.config import settings
+from app.core.db import get_db
+from app.models.user import ROLE_LEVEL, UserORM
 
+# ---------------------------------------------------------------------------
+# Contraseñas (pwdlib: Argon2 por defecto, con salt automático)
+# ---------------------------------------------------------------------------
+password_hash = PasswordHash.recommended()
+
+
+def hash_password(plain: str) -> str:
+    return password_hash.hash(plain)
+
+
+def verify_password(plain: str, hashed: str) -> bool:
+    return password_hash.verify(plain, hashed)
+
+
+# ---------------------------------------------------------------------------
+# Tokens JWT
+# ---------------------------------------------------------------------------
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 credentials_exc = HTTPException(
@@ -35,31 +53,50 @@ def raise_forbidden():
     )
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    to_encode = data.copy()
-    expire = datetime.now(
-        tz=timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
-    to_encode.update({"exp": expire})
-    token = jwt.encode(payload=to_encode, key=SECRET_KEY, algorithm=ALGORITHM)
-    return token
+def create_access_token(sub: str, minutes: Optional[int] = None, extra: Optional[dict] = None) -> str:
+    """`sub` es el id del usuario (como string, según el estándar JWT)."""
+    expire = datetime.now(timezone.utc) + timedelta(
+        minutes=minutes or settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    payload = {"sub": sub, "exp": expire, **(extra or {})}
+    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALG)
 
 
 def decode_token(token: str) -> dict:
-    playload = jwt.decode(jwt=token, key=SECRET_KEY, algorithms=[ALGORITHM])
-    return playload
+    return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALG])
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
-
+# ---------------------------------------------------------------------------
+# Dependencias
+# ---------------------------------------------------------------------------
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> UserORM:
     try:
-        playload = decode_token(token)
-        sub: Optional[str] = playload.get("sub")
-        username: Optional[str] = playload.get("username")
-        if not sub or not username:
-            raise credentials_exc
-
-        return {"email": sub, "username": username}
+        payload = decode_token(token)
     except ExpiredSignatureError:
         raise raise_expired_token()
     except InvalidTokenError:
         raise credentials_exc
+
+    sub = payload.get("sub")
+    if not sub or not str(sub).isdigit():
+        raise credentials_exc
+
+    user = db.get(UserORM, int(sub))
+    if not user or not user.is_active:
+        raise credentials_exc
+    return user
+
+
+def require_role(min_role: str):
+    """Dependencia que exige un rol mínimo: user < editor < admin."""
+    min_level = ROLE_LEVEL[min_role]
+
+    def checker(user: UserORM = Depends(get_current_user)) -> UserORM:
+        if ROLE_LEVEL[user.role] < min_level:
+            raise raise_forbidden()
+        return user
+
+    return checker
+
+
+def has_role(user: UserORM, role: str) -> bool:
+    return ROLE_LEVEL[user.role] >= ROLE_LEVEL[role]
