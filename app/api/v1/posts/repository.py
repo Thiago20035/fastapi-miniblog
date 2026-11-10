@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session, selectinload, joinedload
 from app.models import CategoryORM, PostORM, TagORM, UserORM
 from app.api.v1.tags.repository import TagRepository
 from app.services.pagination import paginate_query
+from app.services.slugs import unique_slug
 
 
 class PostRepository:
@@ -13,6 +14,18 @@ class PostRepository:
     def get(self, post_id: int) -> Optional[PostORM]:
         post_find = select(PostORM).where(PostORM.id == post_id)
         return self.db.execute(post_find).scalar_one_or_none()
+
+    def get_by_slug(self, slug: str) -> Optional[PostORM]:
+        return self.db.execute(select(PostORM).where(PostORM.slug == slug)).scalar_one_or_none()
+
+    def slug_taken(self, slug: str, exclude_id: Optional[int] = None) -> bool:
+        query = select(PostORM.id).where(PostORM.slug == slug)
+        if exclude_id is not None:
+            query = query.where(PostORM.id != exclude_id)
+        return self.db.execute(query).first() is not None
+
+    def make_slug(self, title: str, exclude_id: Optional[int] = None) -> str:
+        return unique_slug(title, lambda s: self.slug_taken(s, exclude_id), max_length=120)
 
     def search(self, query: Optional[str], order_by: str, direction: str, page: int, per_page: int,
                category_slug: Optional[str] = None) -> dict:
@@ -53,8 +66,8 @@ class PostRepository:
 
     def create_post(self, title: str, content: str, user: Optional[UserORM], tags: List[dict],
                     image_url: Optional[str], category_id: Optional[int] = None) -> PostORM:
-        post = PostORM(title=title, content=content, image_url=image_url, user=user,
-                       category_id=category_id)
+        post = PostORM(title=title, slug=self.make_slug(title), content=content,
+                       image_url=image_url, user=user, category_id=category_id)
         self.db.add(post)  # antes de buscar tags, para que el flush no deje el post afuera
         for tag in tags:
             tag_obj = self.ensure_tag(tag["name"])
@@ -66,6 +79,9 @@ class PostRepository:
 
     def update_post(self, post: PostORM, updates: dict) -> PostORM:
         tag_names = updates.pop("tags", None)
+        if updates.get("title") and updates["title"] != post.title:
+            # Si cambia el título, el slug acompaña
+            updates["slug"] = self.make_slug(updates["title"], exclude_id=post.id)
         for key, value in updates.items():
             setattr(post, key, value)
         if tag_names is not None:
