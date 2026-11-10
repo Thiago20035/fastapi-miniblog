@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, TYPE_CHECKING
 from sqlalchemy import Integer, String, Text, DateTime, UniqueConstraint, ForeignKey, Table, Column
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -30,7 +30,7 @@ class PostORM(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     image_url = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow)
+        DateTime, default=lambda: datetime.now(timezone.utc))
 
     # El autor ahora es un usuario real. Si se borra el usuario, el post queda sin autor.
     user_id: Mapped[Optional[int]] = mapped_column(

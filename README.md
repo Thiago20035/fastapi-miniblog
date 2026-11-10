@@ -1,92 +1,131 @@
 # FastAPI Mini Blog
 
-API REST para gestionar publicaciones de un blog. Es un proyecto de aprendizaje y portfolio que evoluciona junto con los módulos de desarrollo backend.
+API REST para un blog, hecha con FastAPI y SQLAlchemy. Es el proyecto que se arma a lo largo de la materia **Desarrollo de Sistemas Web (3.º año, IDRA)**, y este repo llega hasta el **Módulo 16: Seeds y Slug para post**.
 
-## Funcionalidades implementadas actualmente
+## Qué hace
 
-- Crear, listar, consultar, actualizar y eliminar publicaciones.
-- Buscar publicaciones por título.
-- Paginar resultados y ordenar por identificador o título.
-- Filtrar publicaciones por una o más etiquetas.
-- Asociar opcionalmente un autor y etiquetas a una publicación.
-- Validar datos de entrada mediante Pydantic.
-- Manejar respuestas HTTP para recursos no encontrados y errores de persistencia.
-- Documentación interactiva generada por FastAPI.
+- **Posts**: crear (con imagen opcional), listar con búsqueda, paginación y orden, filtrar por categoría o por tags, consultar por id o por **slug**, editar y borrar.
+- **Usuarios reales** guardados en la base, con contraseñas hasheadas (Argon2, usando `pwdlib`) y login con **JWT**.
+- **Roles** `user` < `editor` < `admin`. Cada rol tiene los permisos del anterior.
+- **Tags** (relación N a M): CRUD, búsqueda, el tag más popular y un ranking de uso. Si llegan como `"python, fastapi"` se separan por la coma.
+- **Categorías** (relación 1 a N) con slug: CRUD y cantidad de posts por categoría. Borrar una categoría **no borra** sus posts.
+- **Slugs** automáticos y únicos para los posts (`mi-primer-post`, `mi-primer-post-2`, ...).
+- **Seeds**: usuarios de cada rol, categorías y posts de ejemplo para arrancar.
+- Paginación compartida (`services/pagination.py`) y tests con `pytest`.
 
-## Tecnologías
+## Permisos
 
-- Python
-- FastAPI
-- Pydantic v2
-- SQLAlchemy 2
-- SQLite para desarrollo local
-- python-dotenv para configuración mediante variables de entorno
+| Acción | user | editor | admin |
+|---|:-:|:-:|:-:|
+| Leer posts, tags y categorías | ✔ | ✔ | ✔ |
+| Ver y editar su propio perfil | ✔ | ✔ | ✔ |
+| Crear posts, tags y categorías; subir imágenes | | ✔ | ✔ |
+| Editar o borrar **sus** posts | | ✔ | ✔ |
+| Editar o borrar posts **de otros** | | | ✔ |
+| Borrar categorías | | | ✔ |
+| Listar usuarios, cambiar roles, desactivar o borrar usuarios | | | ✔ |
 
-## Estructura principal
+Todo el que se registra arranca como `user`, y un admin puede ascenderlo. La API no deja quitar ni borrar al último admin activo.
+
+## Estructura
 
 ```text
 app/
 ├── main.py
+├── seeds.py                 # datos de ejemplo
 ├── core/
-│   └── db.py
-├── models/
-│   ├── author.py
-│   ├── post.py
-│   └── tag.py
-└── api/
-    └── v1/
-        └── posts/
-            ├── router.py
-            ├── repository.py
-            └── schemas.py
+│   ├── config.py            # lee el .env (se carga primero)
+│   ├── db.py
+│   └── security.py          # pwdlib, JWT, get_current_user, require_role
+├── models/                  # user, post, tag, category
+├── services/
+│   ├── file_storage.py
+│   ├── pagination.py        # paginate_query reutilizable
+│   └── slugs.py
+├── scripts/create_admin.py
+└── api/v1/
+    ├── auth/  users/  posts/  tags/  categories/  uploads/
+    └── common/schemas.py    # Page[T] para todos los listados
+tests/
 ```
 
-## Requisitos
-
-Python 3.10 o superior. Las dependencias están declaradas en `requirements.txt`.
-
-## Instalación en Windows (PowerShell)
-
-Desde la raíz del repositorio:
+## Instalación (Windows, PowerShell)
 
 ```powershell
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 pip install -r requirements.txt
+copy .env.example .env      # y cambiá JWT_SECRET por una clave larga
 ```
 
-Si necesitás usar variables de entorno, copiá `.env.example` como `.env` y ajustá los valores para tu entorno. No subas el archivo `.env` a GitHub.
-
-## Ejecutar la API
+Para generar una clave nueva:
 
 ```powershell
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+> **Si ya tenías un `blog.db` de módulos anteriores, borralo.** Las tablas cambiaron (users, categories, slug) y por ahora se crean con `create_all`, que no modifica tablas que ya existen. Alembic queda para más adelante.
+
+## Cargar datos y ejecutar
+
+```powershell
+python -m app.seeds          # o: python -m app.seeds --reset para empezar de cero
 fastapi dev app/main.py
 ```
 
-Abrí la documentación interactiva en `http://127.0.0.1:8000/docs`.
+Abrí `http://127.0.0.1:8000/docs`. Con el botón **Authorize** te logueás: en *username* va el **email**.
 
-## Endpoints actuales
+Usuarios de los seeds (contraseña `miniblog123`, o la que pongas en `SEED_PASSWORD`):
 
-| Método | Ruta | Propósito |
-|---|---|---|
-| `GET` | `/posts` | Listar publicaciones, con búsqueda, paginación y orden |
-| `GET` | `/posts/by-tags` | Filtrar publicaciones por etiquetas |
-| `GET` | `/posts/{post_id}` | Consultar una publicación; permite omitir el contenido |
-| `POST` | `/posts` | Crear una publicación |
-| `PUT` | `/posts/{post_id}` | Actualizar una publicación |
-| `DELETE` | `/posts/{post_id}` | Eliminar una publicación |
+| Email | Rol |
+|---|---|
+| admin@miniblog.com | admin |
+| editora@miniblog.com | editor |
+| editor@miniblog.com | editor |
+| lector@miniblog.com | user |
 
-## Estado del proyecto
+Para crear un admin propio sin usar los seeds: `python -m app.scripts.create_admin vos@mail.com tuusuario` (la contraseña te la pide por consola).
 
-Esta es la versión inicial publicada del proyecto. La autenticación JWT, la gestión independiente de usuarios/categorías/etiquetas, los slugs, las migraciones con Alembic, PostgreSQL y el despliegue son trabajo futuro y no se presentan aquí como funcionalidades ya implementadas.
+## Endpoints
 
-Actualmente, la aplicación crea las tablas al iniciar, una solución de desarrollo que se revisará al incorporar migraciones.
+| Método | Ruta | Quién | Para qué |
+|---|---|---|---|
+| `POST` | `/api/v1/auth/register` | público | Registrarse (rol `user`) |
+| `POST` | `/api/v1/auth/login` | público | Login con formulario (`username` = email) |
+| `POST` | `/api/v1/auth/login/json` | público | Login con JSON `{email, password}` |
+| `GET` | `/api/v1/auth/me` | logueado | Usuario actual |
+| `GET` / `PATCH` | `/users/me` | logueado | Ver perfil / cambiar usuario o contraseña |
+| `GET` | `/users` | admin | Listar usuarios (búsqueda, rol, paginación) |
+| `GET` / `DELETE` | `/users/{id}` | admin | Ver o borrar un usuario |
+| `PATCH` | `/users/{id}/role` · `/users/{id}/active` | admin | Cambiar rol / activar o desactivar |
+| `GET` | `/posts` | público | Listar (`search`, `category`, `page`, `per_page`, `order_by`, `direction`) |
+| `GET` | `/posts/by-tags?tags=python&tags=fastapi` | público | Filtrar por tags |
+| `GET` | `/posts/{id}` · `/posts/slug/{slug}` | público | Un post |
+| `POST` | `/posts` | editor | Crear (multipart: `title`, `content`, `tags`, `category_id`, `image`) |
+| `PUT` / `DELETE` | `/posts/{id}` | autor o admin | Editar (`title`, `content`, `category_id`, `tags`) / borrar |
+| `GET` | `/tags` · `/tags/{id}` | público | Listar (con búsqueda) / ver uno |
+| `GET` | `/tags/popular` · `/tags/ranking` | público | Tag más usado / ranking |
+| `POST` / `PUT` / `DELETE` | `/tags` · `/tags/{id}` | editor | CRUD de tags |
+| `GET` | `/categories` · `/categories/{id}` · `/categories/slug/{slug}` | público | Listar / ver |
+| `GET` | `/categories/stats` | público | Posts por categoría |
+| `POST` / `PATCH` | `/categories` · `/categories/{id}` | editor | Crear / editar (el slug sale del nombre si no lo mandás) |
+| `DELETE` | `/categories/{id}` | admin | Borrar (los posts quedan sin categoría) |
+| `POST` | `/upload/save` | editor | Subir una imagen PNG o JPEG |
 
-## Objetivo educativo
+## Tests
 
-El repositorio acompaña el aprendizaje de desarrollo de APIs REST y se ampliará con commits pequeños y coherentes a medida que se implementen nuevas funcionalidades. Cada commit documentará un cambio real en el código.
+```powershell
+pip install pytest
+python -m pytest
+```
+
+Usan una base SQLite temporal y los seeds. Cubren permisos por rol, tags, categorías, slugs, paginación y seeds.
+
+## Pendiente
+
+Migraciones con Alembic, PostgreSQL, refresh tokens y despliegue.
 
 ## Autor
 
-César Gimenez Lascano — [@cgldev](https://github.com/cgldev)
+Base del proyecto: César Gimenez Lascano ([@cgldev](https://github.com/cgldev)). Módulos 13 a 16: Thiago Tarricone.

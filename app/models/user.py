@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, List, Literal
 
 from sqlalchemy import Boolean, DateTime, Enum, Integer, String
@@ -28,6 +28,6 @@ class UserORM(Base):
         Enum(*ROLES, name="user_role"), default="user", nullable=False
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     posts: Mapped[List["PostORM"]] = relationship(back_populates="user", passive_deletes=True)
