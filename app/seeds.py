@@ -143,6 +143,9 @@ def seed() -> dict:
 
 
 def main() -> None:
+    if os.getenv("RENDER") and not os.getenv("SEED_PASSWORD"):
+        # En el sitio publicado no queremos la contraseña de ejemplo (está escrita en el README)
+        sys.exit("Falta SEED_PASSWORD: definila en Render > Environment antes de publicar.")
     if "--reset" in sys.argv:
         Base.metadata.drop_all(bind=engine)
         print("Tablas borradas.")

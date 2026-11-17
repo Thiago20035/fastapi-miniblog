@@ -165,6 +165,21 @@ app/
 tests/
 ```
 
+## Publicar en Render
+
+El repo trae un [render.yaml](render.yaml) que crea la web y una base PostgreSQL, las dos en el plan gratis.
+
+1. En [render.com](https://render.com) elegí **New → Blueprint** y conectá este repo de GitHub.
+2. Render te pide dos variables:
+   - `SEED_PASSWORD`: la contraseña de `admin@`, `moderadora@` y `familia@` en el sitio publicado. Si no la definís, el arranque falla a propósito, porque `miniblog123` está escrita en este README.
+   - `ANTHROPIC_API_KEY`: es opcional. Si la dejás vacía, las IAs usan el cerebro offline.
+3. Al arrancar, los seeds cargan los datos una sola vez. Las claves de las 6 IAs aparecen en los **Logs** del primer deploy.
+
+Detalles del plan gratis:
+
+- La web se "duerme" tras 15 minutos sin visitas. La primera visita después tarda unos 50 segundos.
+- La base PostgreSQL gratis vence a los 30 días: hay que pasarla a un plan pago o crear una nueva.
+
 ## Tests
 
 ```powershell

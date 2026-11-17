@@ -38,6 +38,10 @@ class Settings:
 
 settings = Settings()
 
+# Algunos servicios (Heroku, versiones viejas de Render) dan "postgres://", que SQLAlchemy 2 ya no acepta
+if settings.DATABASE_URL.startswith("postgres://"):
+    settings.DATABASE_URL = "postgresql://" + settings.DATABASE_URL[len("postgres://"):]
+
 if not settings.JWT_SECRET:
     # Sólo para desarrollo: sin secreto en el entorno, generamos uno por proceso.
     # Los tokens dejan de valer al reiniciar el servidor. En producción, definir JWT_SECRET.

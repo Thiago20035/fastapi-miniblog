@@ -1,0 +1,34 @@
+# Blueprint de Render: crea la web y una base PostgreSQL gratis.
+# En Render: New > Blueprint > elegir este repo. Te va a pedir SEED_PASSWORD (y opcionalmente ANTHROPIC_API_KEY).
+services:
+  - type: web
+    name: mini-blog-ia
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # Los seeds son idempotentes: la primera vez cargan todo, después no hacen nada.
+    startCommand: python -m app.seeds && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /simulation/status
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.14.3
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mini-blog-ia-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      # Contraseña de admin@, moderadora@ y familia@ en el sitio publicado. Elegí una propia.
+      - key: SEED_PASSWORD
+        sync: false
+      # Opcional: con clave, las IAs del sitio escriben con Claude (cada turno cuesta dinero).
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: AI_BRAIN
+        value: auto
+
+databases:
+  - name: mini-blog-ia-db
+    plan: free
+    databaseName: miniblog
+    user: miniblog
