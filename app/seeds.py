@@ -10,7 +10,7 @@ Son datos de desarrollo: no los uses en producción.
 import os
 import sys
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app import models  # noqa: F401  (registra todas las tablas)
 from app.api.v1.agents.repository import AgentRepository
@@ -18,7 +18,7 @@ from app.api.v1.categories.repository import CategoryRepository
 from app.api.v1.posts.repository import PostRepository
 from app.api.v1.users.repository import UserRepository
 from app.core.db import Base, SessionLocal, engine
-from app.models import CommentORM, PostORM
+from app.models import CommentORM, PostORM, UserORM
 from app.services.slugs import slugify
 
 SEED_PASSWORD = os.getenv("SEED_PASSWORD", "miniblog123")
@@ -142,6 +142,34 @@ def seed() -> dict:
     return created
 
 
+def print_created(created: dict) -> None:
+    print(f"Seeds cargados: {created['users']} personas, {created['categories']} comunidades, "
+          f"{created['agents']} agentes, {created['posts']} posts y {created['comments']} comentarios nuevos.")
+    if created["keys"]:
+        print("Claves de los agentes del sitio (se muestran sólo ahora; sirven para el header X-Agent-Key):")
+        for handle, key in created["keys"].items():
+            print(f"  @{handle}: {key}")
+
+
+def auto_seed() -> None:
+    """Al arrancar la app: si la base está vacía, carga los datos de ejemplo.
+
+    Sirve en Render, donde el Start Command es sólo `uvicorn ...` y no hay consola para correr
+    los seeds. Con la base SQLite del plan gratis, los datos se recrean en cada reinicio.
+    Se desactiva con AUTO_SEED=0.
+    """
+    if os.getenv("AUTO_SEED", "1") != "1":
+        return
+    with SessionLocal() as db:
+        if db.scalar(select(func.count()).select_from(UserORM)):
+            return
+    if os.getenv("RENDER") and not os.getenv("SEED_PASSWORD"):
+        print("AVISO: no cargo los datos de ejemplo porque falta SEED_PASSWORD "
+              "(la de ejemplo es pública). Definila en Render > Environment.", flush=True)
+        return
+    print_created(seed())
+
+
 def main() -> None:
     if os.getenv("RENDER") and not os.getenv("SEED_PASSWORD"):
         # En el sitio publicado no queremos la contraseña de ejemplo (está escrita en el README)
@@ -151,14 +179,9 @@ def main() -> None:
         print("Tablas borradas.")
     Base.metadata.create_all(bind=engine)
     created = seed()
-    print(f"Seeds cargados: {created['users']} personas, {created['categories']} comunidades, "
-          f"{created['agents']} agentes, {created['posts']} posts y {created['comments']} comentarios nuevos.")
     print(f"Personas: {', '.join(u['email'] + ' (' + u['role'] + ')' for u in USERS)}")
     print("Contraseña: la de SEED_PASSWORD (por defecto miniblog123).")
-    if created["keys"]:
-        print("\nClaves de los agentes del sitio (se muestran sólo ahora; sirven para el header X-Agent-Key):")
-        for handle, key in created["keys"].items():
-            print(f"  @{handle}: {key}")
+    print_created(created)
 
 
 if __name__ == "__main__":

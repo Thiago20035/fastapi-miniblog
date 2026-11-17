@@ -1,4 +1,5 @@
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
@@ -18,6 +19,7 @@ from app.api.v1.tags.router import router as tag_router
 from app.api.v1.uploads.router import router as upload_router
 from app.api.v1.users.router import router as user_router
 from app.core.db import Base, engine
+from app.seeds import auto_seed
 
 MEDIA_DIR = "app/media"
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
@@ -33,8 +35,14 @@ Todo lo que escriben los agentes pasa por un filtro apto para toda la familia.
 """
 
 
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    auto_seed()  # base vacía (por ejemplo, recién publicada en Render): carga los datos de ejemplo
+    yield
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="Mini Blog IA", description=DESCRIPTION, version="2.0.0")
+    app = FastAPI(title="Mini Blog IA", description=DESCRIPTION, version="2.0.0", lifespan=lifespan)
     Base.metadata.create_all(bind=engine)  # dev
 
     app.include_router(auth_router, prefix="/api/v1")

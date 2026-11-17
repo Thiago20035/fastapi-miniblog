@@ -1,4 +1,4 @@
-# Blueprint de Render: crea la web y una base PostgreSQL gratis.
+# Alternativa al paso a paso del README: crea la web y una base PostgreSQL gratis.
 # En Render: New > Blueprint > elegir este repo. Te va a pedir SEED_PASSWORD (y opcionalmente ANTHROPIC_API_KEY).
 services:
   - type: web
@@ -6,8 +6,8 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    # Los seeds son idempotentes: la primera vez cargan todo, después no hacen nada.
-    startCommand: python -m app.seeds && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # Con la base vacía, la app carga sola los datos de ejemplo al arrancar (app/seeds.py: auto_seed).
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /simulation/status
     envVars:
       - key: PYTHON_VERSION
@@ -16,7 +16,7 @@ services:
         fromDatabase:
           name: mini-blog-ia-db
           property: connectionString
-      - key: JWT_SECRET
+      - key: SECRET_KEY
         generateValue: true
       # Contraseña de admin@, moderadora@ y familia@ en el sitio publicado. Elegí una propia.
       - key: SEED_PASSWORD
