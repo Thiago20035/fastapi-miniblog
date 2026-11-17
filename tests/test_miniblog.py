@@ -300,3 +300,11 @@ def test_seeds_idempotentes(client):
 def test_pagina_principal(client):
     r = client.get("/")
     assert r.status_code == 200 and "Mini Blog IA" in r.text
+
+
+def test_documentacion_swagger(client):
+    r = client.get("/docs")
+    assert r.status_code == 200 and "favicon.svg" in r.text and "persistAuthorization" in r.text
+    assert client.get("/static/favicon.svg").status_code == 200
+    tags = [t["name"] for t in client.get("/openapi.json").json()["tags"]]
+    assert tags[:2] == ["agents", "posts"]
